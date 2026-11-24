@@ -107,6 +107,10 @@ const table = {
     mag: 6, reserve: 30, maxReserve: 54, damage: 28, pellets: 8, rpm: 85, reload: 0.55, reloadKind: 'shell',
     range: 22, falloff: [8, 22, 0.35], wall: { cost: 1000, ammo: 400 }, box: 2,
   }, 'Deadfall'),
+  doubleBarrel: def('doubleBarrel', 'Vesper 12', 'shotgun', {
+    mag: 2, reserve: 24, maxReserve: 48, damage: 42, pellets: 10, rpm: 300, reload: 0.55, shellStart: 0.35,
+    reloadKind: 'shell', range: 18, falloff: [6, 18, 0.3], box: 2,
+  }, 'Twin Thunder'),
   autoShotgun: def('autoShotgun', 'Brandt 12', 'shotgun', {
     mag: 8, reserve: 32, maxReserve: 64, damage: 24, pellets: 8, rpm: 220, reload: 0.45, shellStart: 0.5,
     reloadKind: 'shell', range: 20, falloff: [7, 20, 0.35], wall: { cost: 2000, ammo: 800 }, box: 3,
@@ -191,6 +195,7 @@ export const weapons = {
   attachments,
   swapTime: 0.5, // s from a switch to the first shot when the view gives no timing
   grantFraction: 0.65, // a magazine reload moves its ammo at this fraction of the reload without view timing
+  tacticalReloadScale: 0.82, // magazine reloads with rounds remaining are faster than dry reloads
   fireBuffer: 0.08, // s: a semi-automatic press this close to the end of the cooldown fires when it ends
   movingSpeed: 0.5, // m/s of ground speed that counts as moving (spread)
 };
