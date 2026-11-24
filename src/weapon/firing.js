@@ -23,11 +23,12 @@ export const SPREAD = TW.classes.pistol.spread;
 export const FIRE_BUFFER = TW.fireBuffer;
 const MOVING_SPEED = TW.movingSpeed;
 const GRANT_FRACTION = TW.grantFraction;
+const TACTICAL_RELOAD_SCALE = TW.tacticalReloadScale || 0.8;
 
 // ---------------------------------------------------------------- pure state machine
 
 export function createWeaponState(T = tuning.pistol) {
-  return { mag: T.mag, reserve: T.reserve, cooldown: 0, reloading: false, reloadT: 0, granted: false, bloom: 0, buffered: false, shellT: 0 };
+  return { mag: T.mag, reserve: T.reserve, cooldown: 0, reloading: false, reloadT: 0, granted: false, bloom: 0, buffered: false, shellT: 0, tacticalReload: false };
 }
 
 export function resetWeaponState(s, T = tuning.pistol) {
@@ -37,8 +38,10 @@ export function resetWeaponState(s, T = tuning.pistol) {
 
 function startReload(s, T, scale, ev) {
   s.reloading = true; s.reloadT = 0; s.granted = false;
-  if (T.reloadKind === 'shell') s.shellT = ((T.shellStart || 0) + T.reload) * scale;
-  ev.push({ type: 'reload' });
+  s.tacticalReload = s.mag > 0;
+  const effScale = scale * (s.tacticalReload ? TACTICAL_RELOAD_SCALE : 1);
+  if (T.reloadKind === 'shell') s.shellT = ((T.shellStart || 0) + T.reload) * effScale;
+  ev.push({ type: 'reload', tactical: s.tacticalReload });
 }
 
 function grant(s, T, ev) {
@@ -48,7 +51,7 @@ function grant(s, T, ev) {
 }
 
 function cancel(s, ev) {
-  s.reloading = false; s.reloadT = 0;
+  s.reloading = false; s.reloadT = 0; s.tacticalReload = false;
   ev.push({ type: 'reloadCancel', granted: s.granted });
 }
 
@@ -68,7 +71,8 @@ export function step(s, inp, dt, T = tuning.pistol, out = []) {
   const ev = out;
   ev.length = 0;
   const sp = T.spread || SPREAD;
-  const scale = inp.reloadScale > 0 ? inp.reloadScale : 1;
+  const baseScale = inp.reloadScale > 0 ? inp.reloadScale : 1;
+  const effScale = baseScale * (s.reloading && s.tacticalReload ? TACTICAL_RELOAD_SCALE : 1);
   const press = inp.press === undefined ? !!inp.fire : !!inp.press;
   const auto = !!T.auto;
   s.cooldown -= dt;
@@ -81,26 +85,26 @@ export function step(s, inp, dt, T = tuning.pistol, out = []) {
       if (press && s.mag > 0) cancel(s, ev); // and fires below
       else {
         s.reloadT += dt; s.shellT -= dt;
-        const per = T.reload * scale;
+        const per = T.reload * effScale;
         const due = inp.viewTimed ? !!inp.shellIn || s.shellT <= -per : s.shellT <= 0;
         if (due && s.mag < T.mag && s.reserve > 0) {
           s.mag += 1; s.reserve -= 1; s.granted = true;
           s.shellT = inp.viewTimed ? per : s.shellT + per;
           ev.push({ type: 'ammo', moved: 1 });
         }
-        if (s.mag >= T.mag || s.reserve <= 0) { s.reloading = false; ev.push({ type: 'reloadDone' }); }
+        if (s.mag >= T.mag || s.reserve <= 0) { s.reloading = false; s.tacticalReload = false; ev.push({ type: 'reloadDone' }); }
       }
     } else {
-      const R = T.reload * scale;
+      const R = T.reload * effScale;
       s.reloadT += dt;
       const due = inp.viewTimed ? !!inp.magIn : s.reloadT >= R * GRANT_FRACTION;
       if (!s.granted && (due || s.reloadT >= R)) grant(s, T, ev);
-      if (s.reloadT >= R) { s.reloading = false; ev.push({ type: 'reloadDone' }); }
+      if (s.reloadT >= R) { s.reloading = false; s.tacticalReload = false; ev.push({ type: 'reloadDone' }); }
     }
   }
 
   const ready = inp.active && !inp.sprint && !s.reloading && !inp.busy;
-  if (inp.reload && ready && s.mag < T.mag && s.reserve > 0) startReload(s, T, scale, ev);
+  if (inp.reload && ready && s.mag < T.mag && s.reserve > 0) startReload(s, T, baseScale, ev);
 
   if (!ready || s.reloading || auto) s.buffered = false;
   else if (press && s.cooldown > 0 && s.cooldown <= FIRE_BUFFER) s.buffered = true;
@@ -119,8 +123,8 @@ export function step(s, inp, dt, T = tuning.pistol, out = []) {
       s.buffered = false;
       s.cooldown = interval;
       ev.push({ type: 'dry' });
-      if (s.reserve > 0) startReload(s, T, scale, ev);
-    } else if (auto && s.reserve > 0) startReload(s, T, scale, ev); // ran dry with the trigger held
+      if (s.reserve > 0) startReload(s, T, baseScale, ev);
+    } else if (auto && s.reserve > 0) startReload(s, T, baseScale, ev); // ran dry with the trigger held
   }
   return ev;
 }
@@ -458,7 +462,7 @@ export function createWeapon(G, opts = {}) {
       const e = events[i];
       if (e.type === 'fire') { shoot(e.last, e.bloom); checkAmmo(L.slot); }
       else if (e.type === 'dry') emit('weapon:fire', { dry: true, weapon: cur().id });
-      else if (e.type === 'reload') { magIn = false; shellIn = false; emit('weapon:reload', { weapon: cur().id }); viewCall((w) => w.play('reload')); }
+      else if (e.type === 'reload') { magIn = false; shellIn = false; emit('weapon:reload', { weapon: cur().id, tactical: !!e.tactical }); viewCall((w) => w.play('reload')); }
       else if (e.type === 'ammo') { viewCall((w) => w.setRounds(cur().mag)); checkAmmo(L.slot); }
       else if (e.type === 'reloadCancel') {
         // The original view has no cancel: a draw replaces its reload timeline (so its magIn never fires).
@@ -513,7 +517,7 @@ export function createWeapon(G, opts = {}) {
 
   function stopReload(s) {
     if (!s || !s.reloading) return false;
-    s.reloading = false; s.reloadT = 0;
+    s.reloading = false; s.reloadT = 0; s.tacticalReload = false;
     return true;
   }
 
